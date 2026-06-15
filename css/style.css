@@ -124,13 +124,14 @@ body{font-family:var(--font);color:var(--ink);user-select:none;-webkit-user-sele
 }
 .logo{display:flex;align-items:center;gap:14px;}
 .logo-mark{
-  width:42px;height:42px;border-radius:50%;position:relative;
-  background:radial-gradient(circle at 38% 30%,#ff7d97,var(--berry) 60%,#b8334e);
-  box-shadow:0 6px 18px rgba(232,80,107,0.45),inset -3px -4px 8px rgba(0,0,0,0.18);
-  animation:pulse 3.4s ease-in-out infinite;
+  width:46px;height:40px;border-radius:48% 48% 50% 50%;position:relative;
+  background:radial-gradient(circle at 42% 64%,#8ddc6d,#5cb84a 68%,#3f8f33);
+  box-shadow:0 6px 16px rgba(60,143,60,0.4),inset -3px -4px 8px rgba(0,0,0,0.12);
+  animation:pulse 3.4s ease-in-out infinite;margin-top:6px;
 }
-.logo-mark::before{content:"";position:absolute;left:50%;top:8%;width:2px;height:84%;background:rgba(0,0,0,0.35);transform:translateX(-50%);}
-.logo-mark::after{content:"";position:absolute;left:24%;top:30%;width:7px;height:7px;border-radius:50%;background:rgba(0,0,0,0.4);box-shadow:14px 0 0 rgba(0,0,0,0.4),-2px 12px 0 rgba(0,0,0,0.4),16px 12px 0 rgba(0,0,0,0.4);}
+.logo-mark::before,.logo-mark::after{content:"";position:absolute;top:-7px;width:15px;height:15px;border-radius:50%;
+  background:radial-gradient(circle at 50% 58%,#1a1a1a 0 3px,#fff 3.4px);box-shadow:0 1px 2px rgba(0,0,0,0.2);}
+.logo-mark::before{left:5px;} .logo-mark::after{right:5px;}
 @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
 h1{font-size:clamp(38px,9vw,58px);font-weight:800;letter-spacing:0.14em;margin:0;color:var(--leaf-deep);}
 h2{font-size:clamp(26px,6vw,34px);font-weight:800;letter-spacing:0.02em;margin:0 0 4px;color:var(--ink);}
