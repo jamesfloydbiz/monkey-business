@@ -16,9 +16,9 @@ class Sim{
     this.urg=new Float32Array(MAXA);
     this.n=0; this.cleared=0;
 
-    // the pinch is the throughput-limited opening (fd-enforced, does NOT remove);
-    // agents are removed when they reach the goal plaza past it.
-    this.pinch={kind:'pinch', x:level.pinch.x, y:level.pinch.y, nx:0, ny:1, hw:level.pinch.w/2, rate:Infinity, budget:0, passing:0, held:0};
+    // pinches are the throughput-limited openings (fd-enforced, do NOT remove);
+    // agents are removed when they reach the goal plaza past them.
+    this.pinches=level.pinches.map(p=>({kind:'pinch', x:p.x, y:p.y, nx:0, ny:1, hw:p.w/2, rate:Infinity, budget:0, passing:0, held:0}));
     this.goal=level.goal; this.goalR=level.goalR||3;
     this.gates=[];      // {kind:'gate', x,y,nx,ny,hw,rate,budget,passing,held}
     this.paZones=[];    // {x,y,r,factor}
@@ -79,7 +79,7 @@ class Sim{
     }
 
     // 4) openings — throughput + clog, post-integration gating
-    const openings=[this.pinch].concat(this.gates);
+    const openings=this.pinches.concat(this.gates);
     const removeList=[];
     for(const o of openings){
       const tx=-o.ny, ty=o.nx; // tangent

@@ -42,8 +42,8 @@ class Grid{
       for(let j=j0;j<=j1;j++) for(let i=i0;i<=i1;i++) if(this.inB(i,j)) this.walk[this.idx(i,j)]=val;
     };
     for(const w of level.walls) stamp(w.x,w.y,w.w,w.h,0);
-    // punch the pinch gap back open (walkable)
-    if(level.pinch) stamp(level.pinch.x, level.pinch.y, level.pinch.w, 2.4, 1);
+    // punch each pinch gap back open (walkable)
+    for(const p of (level.pinches||[])) stamp(p.x, p.y, p.w, 2.4, 1);
     this.level=level;
   }
   // dynamic barriers from tools: set a run of cells non-walkable
@@ -51,10 +51,14 @@ class Grid{
     for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++) if(this.inB(i,j)) this.walk[this.idx(i,j)]=0;
     this.dirty=true; }
   // stamp a barrier line (player rail), block cells along it; record for render
-  stampSeg(x0,y0,x1,y1){ const len=Math.hypot(x1-x0,y1-y0), steps=Math.max(2,Math.ceil(len*2));
-    for(let s=0;s<=steps;s++){ const t=s/steps, x=U.lerp(x0,x1,t), y=U.lerp(y0,y1,t);
-      const i=this.ci(x),j=this.cj(y); for(let dj=0;dj<=0;dj++)for(let di=0;di<=0;di++){} if(this.inB(i,j)) this.walk[this.idx(i,j)]=0; }
+  stampSeg(x0,y0,x1,y1){ const len=Math.hypot(x1-x0,y1-y0), steps=Math.max(2,Math.ceil(len*3));
+    for(let s=0;s<=steps;s++){ const t=s/steps, x=U.lerp(x0,x1,t), y=U.lerp(y0,y1,t); const i=this.ci(x),j=this.cj(y);
+      for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){ const ni=i+di,nj=j+dj; if(this.inB(ni,nj)) this.walk[this.idx(ni,nj)]=0; } }   // 3-cell brush — no corner gaps
     this.barriers.push({x0,y0,x1,y1}); this.dirty=true; }
+  // snapshot/restore walkability (for validating a barrier doesn't seal the exit)
+  snapWalk(){ return this.walk.slice(); }
+  restoreWalk(snap){ this.walk.set(snap); this.barriers.pop(); this.dirty=true; }
+  goalReachableFromEntry(entry){ const c=this.cost[this.idx(this.ci(entry.x),this.cj(entry.y))]; return c<this.maxCost-1; }
 
   reflood(){
     // BFS ring-distance from goal cell across walkable cells (8-neighbour)

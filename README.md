@@ -24,8 +24,16 @@ bun run serve        # → http://localhost:4173
 python3 -m http.server 4173
 ```
 
-- **Place tools** by selecting one from the dock and clicking the floor.
+- **Place tools** by selecting one from the dock and clicking the floor. Tools cost **Credits**.
 - **Pause:** `Esc`. Tools also bind to keys `1`–`4`.
+
+It's a **tycoon**: you earn Credits by clearing people safely, spend them on tools during an
+event, and between events spend them in a **shop** on permanent upgrades (wider/second exit,
+cheaper meters, faster crews, more reaction time). The run is a sequence of escalating events
+that **starts small** (a few dozen people — learn the heatmap) and builds to a full headliner surge.
+
+**Tools:** Barrier (shape flow), Meter (snaps to the entry — hold people outside),
+PA: Calm / PA: Hurry (shift the crowd's urgency).
 
 ---
 

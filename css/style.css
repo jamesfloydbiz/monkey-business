@@ -90,6 +90,19 @@ h2{font-size:clamp(24px,6vw,32px);font-weight:600;margin:0 0 4px;}
 .hints{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:12px;}
 .hints span{font-size:11.5px;color:var(--ink-faint);background:rgba(255,255,255,0.04);border:1px solid var(--glass-line);padding:6px 11px;border-radius:999px;}
 .hints b{color:var(--gold-soft);font-weight:700;}
+.shop-wallet{display:inline-flex;align-items:center;gap:8px;font-variant-numeric:tabular-nums;font-size:20px;font-weight:700;color:var(--gold-soft);margin:2px 0 4px;}
+.shop-wallet .sw-label{font-size:12px;font-weight:600;color:var(--ink-faint);letter-spacing:0.1em;}
+.shop-list{display:flex;flex-direction:column;gap:9px;width:100%;max-width:340px;margin:4px 0 2px;}
+.shop-item{display:flex;align-items:center;gap:12px;text-align:left;padding:11px 13px;border-radius:14px;background:rgba(255,255,255,0.04);border:1px solid var(--glass-line);cursor:pointer;transition:background .15s,border-color .15s;}
+.shop-item:hover{background:rgba(255,210,120,0.08);}
+.shop-item.bought{opacity:0.5;cursor:default;}
+.shop-item.poor{opacity:0.55;cursor:default;}
+.shop-item .si-main{flex:1;}
+.shop-item .si-name{font-size:14px;font-weight:700;color:var(--ink);}
+.shop-item .si-desc{font-size:11.5px;color:var(--ink-dim);margin-top:2px;line-height:1.35;}
+.shop-item .si-cost{display:flex;align-items:center;gap:5px;font-size:14px;font-weight:700;color:var(--gold-soft);white-space:nowrap;}
+.shop-item .si-cost .mote-dot{width:9px;height:9px;}
+.shop-item.bought .si-cost{color:var(--leaf,#7ddc8a);}
 .stat-row{display:flex;justify-content:space-between;width:100%;max-width:280px;padding:9px 2px;border-bottom:1px solid rgba(255,210,120,0.08);font-size:14.5px;color:var(--ink-dim);}
 .stat-row b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums;}
 .credit{position:absolute;bottom:max(16px,env(safe-area-inset-bottom));left:0;right:0;text-align:center;font-size:11px;color:var(--ink-faint);letter-spacing:0.04em;}

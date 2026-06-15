@@ -32,22 +32,18 @@ class Renderer{
     const base=new THREE.Mesh(new THREE.PlaneGeometry(CONFIG.worldW, CONFIG.worldH),
       new THREE.MeshBasicMaterial({color:0x0d0b12})); base.rotation.x=-Math.PI/2; base.position.y=-0.05; scene.add(base);
 
-    // walls (subtle dark relief)
-    const wallMat=new THREE.MeshStandardMaterial({color:0x17141f, roughness:0.9});
-    for(const w of level.walls){ const m=new THREE.Mesh(new THREE.BoxGeometry(w.w,2.2,w.h), wallMat);
-      m.position.set(w.x,1.0,w.y); scene.add(m); }
-    // goal glow
-    const goalGlow=new THREE.Mesh(new THREE.RingGeometry(2.2,3.0,32), new THREE.MeshBasicMaterial({color:0x8fe0c0,transparent:true,opacity:0.4,side:THREE.DoubleSide}));
-    goalGlow.rotation.x=-Math.PI/2; goalGlow.position.set(level.goal.x,0.12,level.goal.y); scene.add(goalGlow);
+    // static geometry (walls + goal) lives in a group we can rebuild per event
+    this.staticGroup=new THREE.Group(); scene.add(this.staticGroup);
+    this.buildStatic(level);
 
-    // crowd point cloud
-    this.glowTex=this.makeGlow();
+    // crowd: little gold figures (billboarded), plus a soft additive under-glow for the "light" feel
+    this.personTex=this.makePerson(); this.glowTex=this.makeGlow();
     this.pos=new Float32Array(MAXA*3);
-    const geo=new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(this.pos,3));
-    geo.setDrawRange(0,0);
-    this.points=new THREE.Points(geo, new THREE.PointsMaterial({size:1.4, map:this.glowTex, color:0xffdf9c,
-      transparent:true, opacity:0.92, blending:THREE.AdditiveBlending, depthWrite:false, sizeAttenuation:true}));
-    scene.add(this.points);
+    const geo=new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(this.pos,3)); geo.setDrawRange(0,0);
+    const glowGeo=new THREE.BufferGeometry(); glowGeo.setAttribute('position', new THREE.BufferAttribute(this.pos,3)); glowGeo.setDrawRange(0,0);
+    this.glowLayer=new THREE.Points(glowGeo, new THREE.PointsMaterial({size:3.6, map:this.glowTex, color:0xffcf72, transparent:true, opacity:0.3, blending:THREE.AdditiveBlending, depthWrite:false, sizeAttenuation:true}));
+    this.points=new THREE.Points(geo, new THREE.PointsMaterial({size:3.0, map:this.personTex, color:0xffe6b0, transparent:true, alphaTest:0.4, depthWrite:false, sizeAttenuation:true}));
+    scene.add(this.glowLayer, this.points);
 
     this.toolGroup=new THREE.Group(); scene.add(this.toolGroup);
     this.ghost=null;
@@ -55,15 +51,34 @@ class Renderer{
   }
   makeGlow(){ const c=document.createElement('canvas'); c.width=c.height=64; const x=c.getContext('2d');
     const g=x.createRadialGradient(32,32,0,32,32,32); g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(0.4,'rgba(255,225,150,0.6)'); g.addColorStop(1,'rgba(255,200,90,0)');
-    x.fillStyle=g; x.fillRect(0,0,64,64); const t=new THREE.CanvasTexture(c); return t; }
+    x.fillStyle=g; x.fillRect(0,0,64,64); return new THREE.CanvasTexture(c); }
+  makePerson(){ const c=document.createElement('canvas'); c.width=c.height=64; const x=c.getContext('2d');
+    x.fillStyle='#fff';
+    x.beginPath(); x.arc(32,18,10,0,Math.PI*2); x.fill();                                  // head
+    x.beginPath(); x.moveTo(19,42); x.quadraticCurveTo(32,30,45,42); x.lineTo(45,57); x.quadraticCurveTo(32,62,19,57); x.closePath(); x.fill(); // body
+    return new THREE.CanvasTexture(c); }
 
-  syncCrowd(){ const s=this.sim, p=this.pos; for(let i=0;i<s.n;i++){ p[i*3]=s.px[i]; p[i*3+1]=1.0; p[i*3+2]=s.py[i]; }
-    this.points.geometry.setDrawRange(0,s.n); this.points.geometry.attributes.position.needsUpdate=true; }
+  buildStatic(level){ const grp=this.staticGroup; while(grp.children.length) grp.remove(grp.children[0]);
+    const wallMat=new THREE.MeshStandardMaterial({color:0x17141f, roughness:0.9});
+    for(const w of level.walls){ const m=new THREE.Mesh(new THREE.BoxGeometry(w.w,2.2,w.h), wallMat); m.position.set(w.x,1.0,w.y); grp.add(m); }
+    const goalGlow=new THREE.Mesh(new THREE.RingGeometry(2.2,3.0,32), new THREE.MeshBasicMaterial({color:0x8fe0c0,transparent:true,opacity:0.4,side:THREE.DoubleSide}));
+    goalGlow.rotation.x=-Math.PI/2; goalGlow.position.set(level.goal.x,0.12,level.goal.y); grp.add(goalGlow); }
+  // rebind to a freshly-built grid/sim/level (new event geometry)
+  bind(grid,sim,level){ this.grid=grid; this.sim=sim; this.level=level;
+    this.tex=new THREE.DataTexture(grid.img, grid.cols, grid.rows, THREE.RGBAFormat); this.tex.magFilter=THREE.LinearFilter; this.tex.minFilter=THREE.LinearFilter; this.tex.needsUpdate=true;
+    this.floor.material.map=this.tex; this.floor.material.needsUpdate=true;
+    this.buildStatic(level); this.refreshTools(); }
+
+  syncCrowd(){ const s=this.sim, p=this.pos; for(let i=0;i<s.n;i++){ p[i*3]=s.px[i]; p[i*3+1]=1.1; p[i*3+2]=s.py[i]; }
+    this.points.geometry.setDrawRange(0,s.n); this.points.geometry.attributes.position.needsUpdate=true;
+    this.glowLayer.geometry.setDrawRange(0,s.n); this.glowLayer.geometry.attributes.position.needsUpdate=true; }
   syncHeat(){ this.grid.colorize(); this.tex.needsUpdate=true; }
 
   refreshTools(){ const grp=this.toolGroup; while(grp.children.length) grp.remove(grp.children[0]);
-    // barriers
-    for(const b of this.sim.grid.barriers||[]){ const m=new THREE.Mesh(new THREE.BoxGeometry(b.w,1.4,b.h), new THREE.MeshStandardMaterial({color:0xb98a2e,emissive:0x3a2a08,roughness:0.6})); m.position.set(b.x,0.7,b.y); grp.add(m); }
+    // barriers (rendered from their endpoints)
+    for(const b of this.grid.barriers||[]){ const mx=(b.x0+b.x1)/2, my=(b.y0+b.y1)/2, len=Math.hypot(b.x1-b.x0,b.y1-b.y0)+1.8, ang=Math.atan2(b.y1-b.y0,b.x1-b.x0);
+      const m=new THREE.Mesh(new THREE.BoxGeometry(len,1.8,1.6), new THREE.MeshStandardMaterial({color:0xd8a23a,emissive:0x6a4612,emissiveIntensity:0.5,roughness:0.5}));
+      m.position.set(mx,0.9,my); m.rotation.y=-ang; m.castShadow=true; grp.add(m); }
     // gates (bar across the flow + glow)
     for(const o of this.sim.gates){ const tx=-o.ny, ty=o.nx; const len=o.hw*2;
       const bar=new THREE.Mesh(new THREE.BoxGeometry(len,2.0,0.6), new THREE.MeshStandardMaterial({color:0xffd072,emissive:0x6a4a10,roughness:0.4}));
