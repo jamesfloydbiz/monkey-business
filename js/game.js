@@ -1,8 +1,10 @@
 /* ============================================================
-   MONKEY BREACH — game.js
-   Move the zookeeper, auto-net the monkeys (trap, never harm),
-   pour coins into build pads, and let the wave-end truck cart the
-   trapped monkeys back to the zoo. Guard the banana pile.
+   MONKEY BUSINESS — game.js
+   You start with only the banana pile + keeper. Build the base out
+   yourself: select a tool, walk to a spot, tap Build to place it and
+   pay coins. Wall blocks are paid; leave gaps for gates. Monkeys
+   emerge from fixed themed spawn points and raid the pile; the
+   wave-end truck carts the trapped ones home.
    ============================================================ */
 'use strict';
 
@@ -10,44 +12,100 @@ class Game{
   constructor(){
     this.canvas=document.getElementById('game');
     this.render=new Renderer(this.canvas,this);
-    this.hero={x:0,y:8,aim:-Math.PI/2,moving:false};
+    this.hero={x:0,y:13,aim:-Math.PI/2,moving:false,cd:0};
     this.input={up:false,down:false,left:false,right:false}; this.joy={active:false,ox:0,oy:0,dx:0,dy:0,id:null};
-    this.phase='menu'; this.time=0; this.last=performance.now();
+    this.phase='menu'; this.time=0; this.last=performance.now(); this.tool=null;
+    this.structures=[]; this.wallBlocks=[];
     this.bindUI(); this.bindInput();
     window.addEventListener('resize',()=>this.render.resize());
     requestAnimationFrame(t=>this.loop(t));
   }
 
-  beginRun(){ SFX.resume(); this.coins=CONFIG.startCoins; this.bananas=CONFIG.bananas; this.wave=0;
-    this.pads=PAD_LAYOUT.map(p=>({...p,level:0,invested:0})); this.render.buildPads(this.pads);
-    this.monkeys=[]; this.nets=[]; this.netTowers=[]; this.decoys=[]; this.cages=[]; this.muds=[]; this.fences=[];
-    this.render.updatePile(this.bananas);
-    this.hero={x:0,y:8,aim:-Math.PI/2,moving:false};
+  /* ---- run lifecycle ---- */
+  beginRun(){ SFX.resume(); const C=CONFIG;
+    this.coins=C.startCoins; this.bananas=C.bananas; this.wave=0; this.ecoRate=0; this._frontiers=[];
+    this.unlocked=new Set(C.startUnlocks); this.tool=null;
+    this.structures=[]; this.wallBlocks=[];
+    this.monkeys=[]; this.nets=[]; this.trainees=[];
+    this.netTowers=[]; this.decoys=[]; this.cages=[]; this.muds=[]; this.farms=[];
+    this.render.resetBase(); this.render.updateCore(this.bananas); this.render.closeZooGate(); this.render.drawTerritory(this);
+    this.hero={x:0,y:13,aim:-Math.PI/2,moving:false,cd:0};
     ['start','end'].forEach(id=>document.getElementById(id).classList.add('hidden'));
-    document.getElementById('hud').classList.remove('hidden');
-    this.nextWave();
+    document.getElementById('hud').classList.remove('hidden'); document.getElementById('build').classList.remove('hidden');
+    this.buildTray(); this.nextWave();
   }
+
+  /* ---- build tray UI ---- */
+  buildTray(){ const wrap=document.getElementById('tray'); wrap.innerHTML='';
+    this.chips={};
+    for(const type of CONFIG.toolOrder){ const def=CONFIG.build[type];
+      const el=document.createElement('button'); el.className='toolchip'; el.dataset.type=type;
+      el.innerHTML=`<span class="tc-name">${def.name}</span><span class="tc-cost"><span class="coin-dot sm"></span>${def.cost(1)}</span>`;
+      el.onclick=()=>this.selectTool(type); wrap.appendChild(el); this.chips[type]=el; }
+  }
+  selectTool(type){ if(!this.unlocked.has(type)) return; this.tool = (this.tool===type)?null:type; }
+  ghostPos(){ const s=CONFIG.snap; return {x:Math.round(this.hero.x/s)*s, y:Math.round(this.hero.y/s)*s}; }
+  occupied(x,y,minD){ for(const s of this.structures){ if(U.dist(x,y,s.x,s.y)<minD) return true; } for(const w of this.wallBlocks){ if(U.dist(x,y,w.x,w.y)<minD) return true; } return false; }
+  inWater(x,y){ const w=CONFIG.water; return w && x>w.x-w.halfW && x<w.x+w.halfW && y>w.z0 && y<w.z1; }
+  canPlace(type,x,y){ const C=CONFIG, def=C.build[type]; if(!def) return false;
+    if(this.coins < def.cost(1)) return false;
+    if(U.dist(x,y,C.core.x,C.core.y) < C.coreClear) return false;
+    if(this.inWater(x,y)) return false;
+    if(this.occupied(x,y, C.snap*0.9)) return false;
+    return true; }
+  placeTool(){ if(!this.tool) return; const gp=this.ghostPos(); if(!this.canPlace(this.tool,gp.x,gp.y)) return;
+    const def=CONFIG.build[this.tool]; this.coins-=def.cost(1);
+    if(def.wall) this.wallBlocks.push({x:gp.x,y:gp.y});
+    else { this.structures.push({type:this.tool,x:gp.x,y:gp.y,level:1}); this.rebuildDerived(); }
+    this.render.drawTerritory(this); SFX.build(); }
+  upgradeTarget(){ if(this.tool) return null; let best=null,bd=CONFIG.hero.buildReach; const h=this.hero;
+    for(const s of this.structures){ const def=CONFIG.build[s.type]; if(s.level>=def.max) continue; const d=U.dist(h.x,h.y,s.x,s.y); if(d<bd){bd=d;best=s;} } return best; }
+  doUpgrade(){ const s=this.upgradeTarget(); if(!s) return; const cost=CONFIG.build[s.type].cost(s.level+1); if(this.coins<cost) return;
+    this.coins-=cost; s.level++; s._dirty=true; this.rebuildDerived(); SFX.build(); }
+
+  rebuildDerived(){ this.netTowers=[]; this.decoys=[]; this.cages=[]; this.muds=[]; this.farms=[]; this.trainees=[]; this.ecoRate=0;
+    for(const p of this.structures){ const s=CONFIG.build[p.type].stat(p.level);
+      if(p.type==='net') this.netTowers.push({x:p.x,y:p.y,range:s.range,rate:s.rate,cd:0});
+      else if(p.type==='decoy') this.decoys.push({x:p.x,y:p.y,pull:s.pull});
+      else if(p.type==='cage') this.cages.push({x:p.x,y:p.y,r:s.r,cd:s.cd,timer:0});
+      else if(p.type==='mud') this.muds.push({x:p.x,y:p.y,r:s.r,slow:s.slow});
+      else if(p.type==='farm'){ this.farms.push({x:p.x,y:p.y}); this.ecoRate+=s.eco; }
+      else if(p.type==='trainee'){ for(let i=0;i<s.count;i++){ const a=i/s.count*TAU; this.trainees.push({hx:p.x,hy:p.y,x:p.x+Math.cos(a)*3,y:p.y+Math.sin(a)*3,range:s.range,rate:s.rate,speed:s.speed,cd:U.rand(0,1),tx:p.x,ty:p.y,roamT:0,aim:0,moving:false,wob:U.rand(TAU),mesh:null}); } } }
+  }
+
+  /* ---- waves ---- */
+  checkUnlocks(){ const t=CONFIG.unlockByWave[this.wave]; if(t && !this.unlocked.has(t)){ this.unlocked.add(t); this.toast('Unlocked: '+CONFIG.build[t].name); SFX.unlock(); } }
+  baseRadius(){ let r=22; for(const s of this.structures) r=Math.max(r,U.dist(s.x,s.y,0,0)); for(const w of this.wallBlocks) r=Math.max(r,U.dist(w.x,w.y,0,0)); return r; }
   nextWave(){ this.wave++; if(this.wave>CONFIG.totalWaves){ this.win(); return; }
-    const w=CONFIG.waveSpec(this.wave); this.breaches=w.breaches; this.render.buildFence(w.breaches);
-    this.breachXs=CONFIG.breachXs(w.breaches);
+    this.checkUnlocks();
+    const w=CONFIG.waveSpec(this.wave); this.waveDef=w;
+    const prev=this._frontiers||[]; const added=w.frontiers.filter(f=>!prev.includes(f) && prev.length); this._frontiers=w.frontiers.slice(); this.frontiers=w.frontiers;
+    this.render.buildSpawnMarkers(w.frontiers);
     this.spawnQueue=[]; const tw=w.pool.reduce((s,p)=>s+p[1],0);
     for(let i=0;i<w.count;i++){ let r=Math.random()*tw,pick=w.pool[0][0]; for(const [k,v] of w.pool){ if((r-=v)<=0){pick=k;break;} } this.spawnQueue.push(pick); }
-    this.spawnInterval=w.interval; this.spawnTimer=1.0; this.phase='play';
-    this.fenceSealed=false;
-    this.banner('WAVE '+this.wave, this.wave===1?'Stand on a pad to build · guard the bananas':'');
-    SFX.wave();
+    if(w.boss) this.spawnQueue.push('boss');
+    this.spawnInterval=w.interval; this.spawnTimer=1.4; this.phase='play';
+    if(added.includes('zoo')){ this.render.openZooGate(); this.banner('THE ZOO BREAKS OPEN', 'The captives join the raid from the east'); SFX.boss(); }
+    else if(added.includes('mountains')){ this.banner('THE MOUNTAINS STIR', 'A second frontier opens to the north-east'); SFX.boss(); }
+    else if(w.boss){ this.banner('BOSS · WAVE '+this.wave, 'A silverback is coming for the pile'); SFX.boss(); }
+    else this.banner('WAVE '+this.wave+' / '+CONFIG.totalWaves, this.wave===1?'Build walls & nets — guard the pile':'');
+    if(!w.boss && !added.length) SFX.wave();
   }
-  win(){ this.phase='over'; this.render.hidePads(); SFX.win();
-    document.getElementById('endTitle').textContent='Zoo secured'; document.getElementById('endText').textContent='Every breach held, every monkey home, the bananas safe. The keeper rests.';
-    document.getElementById('eWave').textContent=CONFIG.totalWaves; document.getElementById('eBananas').textContent=this.bananas; document.getElementById('eCoins').textContent=Math.floor(this.coins);
-    document.getElementById('againBtn').textContent='New run'; document.getElementById('end').classList.remove('hidden'); }
-  lose(){ if(this.phase==='over') return; this.phase='over'; this.render.hidePads(); SFX.lose();
-    document.getElementById('endTitle').textContent='The bananas are gone'; document.getElementById('endText').textContent='The pile was carried off through the breach. Build nets and decoys sooner, and trap the carriers before they run.';
-    document.getElementById('eWave').textContent=this.wave; document.getElementById('eBananas').textContent=0; document.getElementById('eCoins').textContent=Math.floor(this.coins);
-    document.getElementById('againBtn').textContent='Try again'; document.getElementById('end').classList.remove('hidden'); }
-  togglePause(f){ if(this.phase!=='play'&&this.phase!=='pause'&&this.phase!=='truck') return; const playing=this.phase==='pause'?false:true;
-    if(f===undefined) f=this.phase!=='pause'; this._prePause=this._prePause||'play';
-    if(f){ this._prePause=this.phase; this.phase='pause'; document.getElementById('pWave').textContent=this.wave; document.getElementById('pBananas').textContent=this.bananas; document.getElementById('pCoins').textContent=Math.floor(this.coins); document.getElementById('pause').classList.remove('hidden'); }
+  win(){ this.phase='over'; SFX.win(); document.getElementById('build').classList.add('hidden');
+    document.getElementById('endTitle').textContent='The zoo is whole again';
+    document.getElementById('endText').textContent='One hundred waves held. Every monkey home, the pile intact. A legendary keeper.';
+    this.fillEnd(CONFIG.totalWaves); document.getElementById('againBtn').textContent='New run'; document.getElementById('end').classList.remove('hidden'); }
+  lose(){ if(this.phase==='over') return; this.phase='over'; SFX.lose(); document.getElementById('build').classList.add('hidden');
+    document.getElementById('endTitle').textContent='The pile is gone';
+    document.getElementById('endText').textContent='The last banana was carried off. Wall in the pile sooner and ring it with nets.';
+    this.fillEnd(this.wave, true); document.getElementById('againBtn').textContent='Try again'; document.getElementById('end').classList.remove('hidden'); }
+  fillEnd(wave, dead){ document.getElementById('eWave').textContent=wave; document.getElementById('eBananas').textContent=dead?0:this.bananas;
+    document.getElementById('eCoins').textContent=Math.floor(this.coins); document.getElementById('ePlots').textContent=this.structures.length+this.wallBlocks.length; }
+  togglePause(f){ if(this.phase!=='play'&&this.phase!=='pause'&&this.phase!=='truck') return;
+    if(f===undefined) f=this.phase!=='pause';
+    if(f){ this._prePause=this.phase; this.phase='pause';
+      document.getElementById('pWave').textContent=this.wave+' / '+CONFIG.totalWaves; document.getElementById('pBananas').textContent=this.bananas; document.getElementById('pCoins').textContent=Math.floor(this.coins);
+      document.getElementById('pause').classList.remove('hidden'); }
     else { this.phase=this._prePause||'play'; document.getElementById('pause').classList.add('hidden'); } }
 
   /* ---- input ---- */
@@ -55,11 +113,13 @@ class Game{
     $('playBtn').onclick=()=>this.beginRun(); $('againBtn').onclick=()=>this.beginRun();
     $('pauseBtn').onclick=()=>this.togglePause(true); $('resumeBtn').onclick=()=>this.togglePause(false);
     $('restartBtn').onclick=()=>{ this.togglePause(false); this.beginRun(); };
-    $('muteBtn').onclick=e=>{ const m=!SFX.isMuted(); SFX.setMuted(m); e.target.textContent='Sound: '+(m?'Off':'On'); }; }
+    $('muteBtn').onclick=e=>{ const m=!SFX.isMuted(); SFX.setMuted(m); e.target.textContent='Sound: '+(m?'Off':'On'); };
+    $('buildBtn').onclick=()=>this.placeTool(); $('upgradeBtn').onclick=()=>this.doUpgrade(); $('cancelBtn').onclick=()=>{ this.tool=null; }; }
   bindInput(){ const keymap={ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right'};
-    addEventListener('keydown',e=>{ if(e.code==='Escape'){this.togglePause();return;} if(keymap[e.code]){this.input[keymap[e.code]]=true;e.preventDefault();} });
+    addEventListener('keydown',e=>{ if(e.code==='Escape'){this.togglePause();return;} if(e.code==='Space'){ if(this.tool) this.placeTool(); else this.doUpgrade(); e.preventDefault(); return; } if(keymap[e.code]){this.input[keymap[e.code]]=true;e.preventDefault();} });
     addEventListener('keyup',e=>{ if(keymap[e.code]) this.input[keymap[e.code]]=false; });
     const cv=this.canvas, stick=document.getElementById('stick'), nub=document.getElementById('stickNub');
+    const fromUI=t=>{ let el=t.target; while(el){ if(el.id==='build'||el.id==='hud'||el.classList&&el.classList.contains('overlay')) return true; el=el.parentElement; } return false; };
     const down=(px,py,id)=>{ this.joy.active=true; this.joy.id=id; this.joy.ox=px; this.joy.oy=py; this.joy.dx=0; this.joy.dy=0; stick.style.left=px+'px'; stick.style.top=py+'px'; stick.classList.remove('hidden'); nub.style.transform='translate(-50%,-50%)'; };
     const move=(px,py)=>{ if(!this.joy.active) return; let dx=px-this.joy.ox,dy=py-this.joy.oy; const max=54,d=Math.hypot(dx,dy); if(d>max){dx=dx/d*max;dy=dy/d*max;} this.joy.dx=dx/max; this.joy.dy=dy/max; nub.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`; };
     const up=()=>{ this.joy.active=false; this.joy.dx=0; this.joy.dy=0; stick.classList.add('hidden'); };
@@ -70,30 +130,24 @@ class Game{
   }
   moveHero(dt){ const h=this.hero,C=CONFIG; let mx=(this.input.right?1:0)-(this.input.left?1:0), my=(this.input.down?1:0)-(this.input.up?1:0);
     if(this.joy.active&&(this.joy.dx||this.joy.dy)){ mx=this.joy.dx; my=this.joy.dy; } const ml=Math.hypot(mx,my); if(ml>1){ mx/=ml; my/=ml; }
-    h.moving=ml>0.1; h.x=U.clamp(h.x+mx*C.hero.speed*dt,-C.worldW/2+2,C.worldW/2-2); h.y=U.clamp(h.y+my*C.hero.speed*dt,C.breachY+3,C.worldH/2-2);
+    h.moving=ml>0.1; const lim=C.worldClamp; h.x=U.clamp(h.x+mx*C.hero.speed*dt,-lim,lim); h.y=U.clamp(h.y+my*C.hero.speed*dt,-lim,lim);
+    this.collideWalls(h,C.hero.radius); this.collideWater(h);
+    if(h.moving) h.aim=U.ang(0,0,mx,my);
   }
 
-  /* ---- build pads ---- */
-  padCost(p){ return CONFIG.pads[p.type].cost(p.level+1); }
-  updateBuild(dt){ const h=this.hero; for(const p of this.pads){ const def=CONFIG.pads[p.type]; if(p.level>=def.max) continue;
-    if(U.dist(h.x,h.y,p.x,p.y)<CONFIG.hero.padReach && this.coins>0){ const cost=this.padCost(p), t=Math.min(CONFIG.hero.drainPerSec*dt,this.coins,cost-p.invested); this.coins-=t; p.invested+=t;
-      if(p.invested>=cost-1e-6){ p.invested-=cost; p.level++; this.applyPad(p); SFX.build(); } } } }
-  applyPad(p){ this.render.onBuild(p); this.rebuildTowers(); }
-  rebuildTowers(){ this.netTowers=[]; this.decoys=[]; this.cages=[]; this.muds=[]; this.fences=[];
-    for(const p of this.pads){ if(p.level<1) continue; const s=CONFIG.pads[p.type].stat(p.level);
-      if(p.type==='net') this.netTowers.push({x:p.x,y:p.y,range:s.range,rate:s.rate,cd:0});
-      else if(p.type==='decoy') this.decoys.push({x:p.x,y:p.y,pull:s.pull});
-      else if(p.type==='cage') this.cages.push({x:p.x,y:p.y,r:s.r,cd:s.cd,timer:0});
-      else if(p.type==='mud') this.muds.push({x:p.x,y:p.y,r:s.r,slow:s.slow});
-      else if(p.type==='fence') this.fences.push({x:p.x,y:p.y,dur:s.dur,cd:s.cd,timer:0,on:false}); }
-  }
+  /* ---- collision ---- */
+  collideWalls(e,r){ if(!this.wallBlocks||!this.wallBlocks.length) return; const WR=CONFIG.build.wall.foot, rr=WR+r;
+    for(const w of this.wallBlocks){ const ox=e.x-w.x, oy=e.y-w.y, d=Math.hypot(ox,oy); if(d<rr){ if(d>1e-4){ const p=rr-d; e.x+=ox/d*p; e.y+=oy/d*p; } else { e.x+=rr; } } } }
+  collideWater(h){ const w=CONFIG.water; if(!w||h.y<w.z0||h.y>w.z1||Math.abs(h.y)<w.bridgeHalf) return;
+    const R=CONFIG.hero.radius, left=w.x-w.halfW-R, right=w.x+w.halfW+R; if(h.x>left && h.x<right) h.x = (h.x<w.x)?left:right; }
 
   /* ---- monkeys ---- */
-  spawn(type){ const def=CONFIG.monkeys[type]; const bx=U.choice(this.breachXs);
-    this.monkeys.push({type,def,x:bx+U.rand(-3,3),y:CONFIG.breachY,state:'incoming',carrying:false,netHits:0,grabT:0,wob:U.rand(TAU),struggle:0,face:Math.PI/2,target:null,mesh:null}); }
+  spawn(type){ const def=CONFIG.monkeys[type]; const fr=this.frontiers||['jungle'];
+    const key=(def.zoo && fr.includes('zoo')) ? 'zoo' : U.choice(fr); const reg=CONFIG.regions[key];
+    const x=reg.sx+U.rand(-5,5), y=reg.sy+U.rand(-5,5);
+    this.monkeys.push({type,def,x,y,state:'incoming',carrying:false,netHits:0,grabT:0,wob:U.rand(TAU),struggle:0,face:0,target:null,sx:reg.sx,sy:reg.sy,mesh:null}); }
   assignTarget(m){ if(this.decoys.length && !m.def.decoyProof){ let best=null,bd=1e9; for(const d of this.decoys){ const dd=U.dist2(m.x,m.y,d.x,d.y); if(dd<bd){bd=dd;best=d;} } m.target={x:best.x,y:best.y,kind:'decoy'}; }
-    else m.target={x:CONFIG.pile.x,y:CONFIG.pile.y,kind:'pile'}; }
-  nearestBreach(x){ let best=this.breachXs[0],bd=1e9; for(const bx of this.breachXs){ const d=Math.abs(bx-x); if(d<bd){bd=d;best=bx;} } return best; }
+    else m.target={x:CONFIG.core.x,y:CONFIG.core.y,kind:'pile'}; }
   mudFactor(x,y){ let f=1; for(const z of this.muds){ if(U.dist2(x,y,z.x,z.y)<z.r*z.r) f=Math.min(f,z.slow); } return f; }
 
   updateMonkeys(dt){ const list=this.monkeys;
@@ -103,68 +157,86 @@ class Game{
       const spd=m.def.speed*this.mudFactor(m.x,m.y);
       if(m.state==='incoming'){
         const tx=m.target.x,ty=m.target.y, d=U.dist(m.x,m.y,tx,ty); m.face=U.ang(m.x,m.y,tx,ty);
-        if(d<2.4){ m.state='grab'; m.grabT=m.def.grab; }
+        if(d<2.6){ m.state='grab'; m.grabT=m.def.grab; }
         else { m.x+=Math.cos(m.face)*spd*dt; m.y+=Math.sin(m.face)*spd*dt; }
       } else if(m.state==='grab'){
-        m.grabT-=dt; if(m.grabT<=0){ if(m.target.kind==='pile'){ if(this.bananas>0){ this.bananas--; this.render.updatePile(this.bananas); m.carrying=true; if(this.bananas<=0){ this.lose(); } } }
-          m.state='fleeing'; const bx=this.nearestBreach(m.x); m.flee={x:bx,y:CONFIG.breachY}; }
+        m.grabT-=dt; if(m.grabT<=0){ if(m.target.kind==='pile' && this.bananas>0){ this.bananas--; this.render.updateCore(this.bananas); m.carrying=true; if(this.bananas<=0) this.lose(); }
+          m.state='fleeing'; }
       } else if(m.state==='fleeing'){
-        const tx=m.flee.x,ty=m.flee.y; m.face=U.ang(m.x,m.y,tx,ty); m.x+=Math.cos(m.face)*spd*dt; m.y+=Math.sin(m.face)*spd*dt;
-        if(m.y<=CONFIG.breachY+1){ // escaped — carried banana is lost for good
-          this.render.removeMonkeyMesh(m); list.splice(i,1); }
+        m.face=U.ang(m.x,m.y,m.sx,m.sy); m.x+=Math.cos(m.face)*spd*dt; m.y+=Math.sin(m.face)*spd*dt;
+        if(U.dist(m.x,m.y,m.sx,m.sy)<4){ this.render.removeMonkeyMesh(m); list.splice(i,1); continue; }
       }
-      // cage traps
-      for(const c of this.cages){ if(c.timer<=0 && m.state!=='trapped' && U.dist2(m.x,m.y,c.x,c.y)<c.r*c.r){ this.trap(m); c.timer=c.cd; this.render.burst(c.x,c.y,ACCENT.net); } }
+      if(!m.def.climb) this.collideWalls(m, m.def.r*0.55);
+      for(const c of this.cages){ if(c.timer<=0 && m.state!=='trapped' && !m.def.boss && U.dist2(m.x,m.y,c.x,c.y)<c.r*c.r){ this.trap(m); c.timer=c.cd; this.render.burst(c.x,c.y,ACCENT.net); } }
     }
     for(const c of this.cages) c.timer=Math.max(0,c.timer-dt);
   }
-  trap(m){ m.state='trapped'; m.netHits=m.def.nets; }
+  trap(m){ m.state='trapped'; m.netHits=m.def.nets; SFX.hit(); }
   hitNet(m){ m.netHits++; if(m.netHits>=m.def.nets) this.trap(m); }
-
   activeMonkeys(){ let n=0; for(const m of this.monkeys) if(m.state!=='trapped') n++; return n; }
   nearestActive(x,y,range){ let best=null,bd=range*range; for(const m of this.monkeys){ if(m.state==='trapped') continue; const d=U.dist2(x,y,m.x,m.y); if(d<bd){bd=d;best=m;} } return best; }
 
-  fireNet(x,y,target){ const a=U.ang(x,y,target.x,target.y); this.nets.push({x,y,vx:Math.cos(a)*CONFIG.hero.netSpeed,vy:Math.sin(a)*CONFIG.hero.netSpeed,target,life:1.2}); SFX.shoot(); }
+  /* ---- nets / towers / trainees ---- */
+  fireNet(x,y,target){ const a=U.ang(x,y,target.x,target.y); this.nets.push({x,y,vx:Math.cos(a)*CONFIG.hero.netSpeed,vy:Math.sin(a)*CONFIG.hero.netSpeed,target,life:1.3}); SFX.shoot(); }
   updateNets(dt){ for(let i=this.nets.length-1;i>=0;i--){ const n=this.nets[i]; n.x+=n.vx*dt; n.y+=n.vy*dt; n.life-=dt; const t=n.target;
-    if(!t || t.state==='trapped' || U.dist(n.x,n.y,t.x,t.y)<1.8){ if(t && t.state!=='trapped' && U.dist(n.x,n.y,t.x,t.y)<2.6) this.hitNet(t); this.nets.splice(i,1); continue; }
-    if(n.life<=0){ this.nets.splice(i,1); } } }
+    if(!t || t.state==='trapped' || U.dist(n.x,n.y,t.x,t.y)<1.8){ if(t && t.state!=='trapped' && U.dist(n.x,n.y,t.x,t.y)<2.8) this.hitNet(t); this.nets.splice(i,1); continue; }
+    if(n.life<=0) this.nets.splice(i,1); } }
   updateTowers(dt){ for(const tw of this.netTowers){ tw.cd-=dt; if(tw.cd<=0){ const m=this.nearestActive(tw.x,tw.y,tw.range); if(m){ tw.cd=1/tw.rate; this.fireNet(tw.x,tw.y,m); } } } }
+  updateTrainees(dt){ for(const k of this.trainees){ k.wob+=dt*8; k.cd-=dt;
+    const m=this.nearestActive(k.x,k.y,k.range);
+    if(m){ k.aim=U.ang(k.x,k.y,m.x,m.y); k.tx=U.lerp(k.x,m.x,0.5); k.ty=U.lerp(k.y,m.y,0.5); if(k.cd<=0){ k.cd=1/k.rate; this.fireNet(k.x,k.y,m); } }
+    else { k.roamT-=dt; if(k.roamT<=0){ k.roamT=U.rand(1.2,2.6); const a=U.rand(TAU),r=U.rand(0,6); k.tx=k.hx+Math.cos(a)*r; k.ty=k.hy+Math.sin(a)*r; } }
+    const d=U.dist(k.x,k.y,k.tx,k.ty); k.moving=d>0.4; if(k.moving){ const a=U.ang(k.x,k.y,k.tx,k.ty); k.x+=Math.cos(a)*k.speed*dt; k.y+=Math.sin(a)*k.speed*dt; if(!m) k.aim=a; } } }
 
   /* ---- truck (wave end) ---- */
-  startTruck(){ this.phase='truck'; this.truck={stage:'in',x:this.breachXs[0]||0,y:CONFIG.breachY,t:0,loadT:0,paid:0}; SFX.turret(); }
+  startTruck(){ this.phase='truck'; const ext=this.baseRadius(); this.truck={stage:'in',x:0,y:-(ext+16),t:0,loadT:0}; SFX.turret(); }
   updateTruck(dt){ const tr=this.truck;
-    if(tr.stage==='in'){ tr.y=U.approach(tr.y,10,18,dt); this.render.setTruck(true,tr.x,tr.y,0); if(tr.y>=9.5) tr.stage='load';
+    if(tr.stage==='in'){ tr.y=U.approach(tr.y,-9,22,dt); this.render.setTruck(true,tr.x,tr.y,0); if(tr.y>=-9.5) tr.stage='load';
     } else if(tr.stage==='load'){ this.render.setTruck(true,tr.x,tr.y,0); tr.loadT-=dt;
-      if(tr.loadT<=0){ const m=this.monkeys.find(mm=>mm.state==='trapped'); if(m){ this.coins+=m.def.bounty; if(m.carrying){ this.bananas++; this.render.updatePile(this.bananas); } this.render.coinPop(tr.x,tr.y+3); this.render.removeMonkeyMesh(m); this.monkeys.splice(this.monkeys.indexOf(m),1); tr.loadT=0.22; SFX.pickup(); }
+      if(tr.loadT<=0){ const m=this.monkeys.find(mm=>mm.state==='trapped');
+        if(m){ this.coins+=m.def.bounty; if(m.carrying){ this.bananas++; this.render.updateCore(this.bananas); } this.render.coinPop(m.x,m.y+3); this.render.removeMonkeyMesh(m); this.monkeys.splice(this.monkeys.indexOf(m),1); tr.loadT=0.2; SFX.pickup(); }
         else tr.stage='out'; }
-    } else { tr.y=U.approach(tr.y,CONFIG.breachY-14,22,dt); this.render.setTruck(true,tr.x,tr.y,0); if(tr.y<=CONFIG.breachY-13){ this.render.setTruck(false); this.endTruck(); } }
+    } else { const ext=this.baseRadius(); tr.y=U.approach(tr.y,-(ext+20),26,dt); this.render.setTruck(true,tr.x,tr.y,0); if(tr.y<=-(ext+19)){ this.render.setTruck(false); this.endTruck(); } }
   }
-  endTruck(){ this.monkeys=this.monkeys.filter(m=>{ if(m.state!=='trapped'){ return true; } this.render.removeMonkeyMesh(m); return false; }); this.nextWave(); }
+  endTruck(){ this.monkeys=this.monkeys.filter(m=>{ if(m.state!=='trapped') return true; this.render.removeMonkeyMesh(m); return false; }); this.nextWave(); }
 
   /* ---- loop ---- */
-  update(dt){ this.time+=dt; this.moveHero(dt); this.updateBuild(dt);
-    if(this.phase==='truck'){ this.updateTruck(dt); return; }
-    // spawn
+  update(dt){ this.time+=dt; this.moveHero(dt);
+    if(this.ecoRate) this.coins+=this.ecoRate*dt;
+    if(this.phase==='truck'){ this.updateTrainees(dt); this.updateTowers(dt); this.updateNets(dt); this.updateMonkeys(dt); this.updateTruck(dt); this.syncHUD(); return; }
     if(this.spawnQueue.length){ this.spawnTimer-=dt; if(this.spawnTimer<=0){ this.spawn(this.spawnQueue.shift()); this.spawnTimer=this.spawnInterval; } }
-    this.updateMonkeys(dt); this.updateTowers(dt); this.updateNets(dt);
-    // hero auto-net
-    this.hero.cd=(this.hero.cd||0)-dt; const tgt=this.nearestActive(this.hero.x,this.hero.y,CONFIG.hero.netRange);
+    this.updateMonkeys(dt); this.updateTowers(dt); this.updateTrainees(dt); this.updateNets(dt);
+    this.hero.cd-=dt; const tgt=this.nearestActive(this.hero.x,this.hero.y,CONFIG.hero.netRange);
     if(tgt){ this.hero.aim=U.ang(this.hero.x,this.hero.y,tgt.x,tgt.y); if(this.hero.cd<=0){ this.hero.cd=1/CONFIG.hero.netRate; this.fireNet(this.hero.x,this.hero.y,tgt); } }
     if(this.bananas<=0){ this.lose(); return; }
-    // wave end -> truck
     if(this.spawnQueue.length===0 && this.activeMonkeys()===0){ if(this.monkeys.length) this.startTruck(); else this.nextWave(); }
     this.syncHUD();
   }
-  syncHUD(){ document.getElementById('waveNum').textContent=this.wave; document.getElementById('bananaNum').textContent=this.bananas; document.getElementById('coinNum').textContent=Math.floor(this.coins); }
+  syncHUD(){ const $=i=>document.getElementById(i);
+    $('waveNum').textContent=this.wave+'/'+CONFIG.totalWaves; $('bananaNum').textContent=this.bananas;
+    $('coinNum').textContent=Math.floor(this.coins); $('ecoNum').textContent='+'+this.ecoRate.toFixed(1); $('plotNum').textContent=this.structures.length+this.wallBlocks.length;
+    this.syncTray(); }
+  syncTray(){ if(!this.chips) return; const C=CONFIG;
+    for(const type in this.chips){ const el=this.chips[type], def=C.build[type], locked=!this.unlocked.has(type), poor=this.coins<def.cost(1);
+      el.classList.toggle('locked',locked); el.classList.toggle('poor',!locked&&poor); el.classList.toggle('sel',this.tool===type); }
+    const bb=document.getElementById('buildBtn'), ub=document.getElementById('upgradeBtn'), cb=document.getElementById('cancelBtn');
+    if(this.tool){ const gp=this.ghostPos(), ok=this.canPlace(this.tool,gp.x,gp.y); bb.classList.remove('hidden'); cb.classList.remove('hidden'); ub.classList.add('hidden');
+      bb.classList.toggle('off',!ok); bb.innerHTML=`Build <b>${C.build[this.tool].name}</b>`; }
+    else { bb.classList.add('hidden'); cb.classList.add('hidden'); const t=this.upgradeTarget();
+      if(t){ const cost=C.build[t.type].cost(t.level+1); ub.classList.remove('hidden'); ub.classList.toggle('off',this.coins<cost); ub.innerHTML=`Upgrade <b>${C.build[t.type].name}</b> · ${cost}`; }
+      else ub.classList.add('hidden'); } }
   banner(k,n){ const b=document.getElementById('banner'); b.innerHTML=`<span class="wb-k">${k}</span>`+(n?`<span class="wb-s">${n}</span>`:''); b.classList.remove('show'); void b.offsetWidth; b.classList.add('show'); }
+  toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(this._tt); this._tt=setTimeout(()=>t.classList.remove('show'),1900); }
 
   loop(now){ let dt=(now-this.last)/1000; this.last=now; if(dt>0.033) dt=0.033;
     if(this.phase==='play'||this.phase==='truck') this.update(dt);
-    const t=this.time;
+    const t=this.time, playing=this.phase!=='over'&&this.phase!=='menu';
     if(this.monkeys) this.render.syncMonkeys(this.monkeys);
+    if(this.trainees) this.render.syncTrainees(this.trainees,t);
     this.render.syncNets(this.nets||[]); this.render.syncHero(this.hero,t);
-    if(this.pads && this.phase!=='over'&&this.phase!=='menu') this.render.updatePads(this,t); else this.render.hidePads();
-    this.render.updateFx(dt); this.render.draw();
+    if(playing){ this.render.syncStructures(this.structures); this.render.syncWalls(this.wallBlocks);
+      if(this.tool){ const gp=this.ghostPos(); this.render.setGhost(this.tool,gp.x,gp.y,this.canPlace(this.tool,gp.x,gp.y)); } else this.render.clearGhost(); }
+    this.render.streamWorld(this.hero); this.render.updateFx(dt); this.render.followCam(this.hero,dt); this.render.draw();
     requestAnimationFrame(t2=>this.loop(t2));
   }
 }

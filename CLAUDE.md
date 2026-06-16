@@ -5,12 +5,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A self-contained browser-game repo (no framework, no build step). The repo has been
-reconcepted many times (LUMEN → PICNIC → FLOW → Monkey Breach) — **always read the current
+reconcepted many times (LUMEN → PICNIC → FLOW → Monkey Business) — **always read the current
 files before assuming the theme.**
 
-- **Root = `Monkey Breach`** (the active game): a Kingshot-style zoo-breach defense. Steer a
-  zookeeper, stand on build pads to spend coins, net escaping monkeys (trap, never harm), and
-  a wave-end truck carts the trapped ones home. The stealable **banana pile** is the core.
+- **Root = `Monkey Business`** (the active game): an **open-world** zoo-breach defense + **free-form
+  base builder**. A follow-cam tracks a roaming zookeeper across a **chunk-streamed** world. You
+  **start with only the banana pile + keeper** (no base) and **build it out yourself** — pick a tool
+  from the bottom tray, walk to a spot, tap **Build** to place it and pay coins. **No plots, no grid.**
+  Place towers, a **banana farm** (passive coin income), and **paid wall blocks** (leave gaps for
+  gates); upgrade by standing on a structure and tapping Upgrade. Net the monkeys (trap, never harm)
+  that raid the pile; a wave-end truck carts trapped ones home, paying a bounty and returning any
+  banana they grabbed. Monkeys come from **fixed themed spawn points** — Jungle (SW), then Mountains
+  (NE), then the Zoo gate (E) — across **100 waves** (boss every 10th). Lose when the pile empties.
 - **`crowd-control/`** = an archived earlier prototype (FLOW, a crowd-safety tycoon). Fully
   self-contained; don't touch it unless asked. Served at `/crowd-control/`.
 
@@ -49,19 +55,37 @@ Three layers, each its own file, wired by a single rAF loop in `game.js`:
 while playing) → render syncs from state → `renderer.render`. Keep sim deterministic and
 render-agnostic so it can be stepped headlessly for testing (see below).
 
-**Coordinate system:** world units are meters, origin at center. The sim is 2D on the ground
-plane; sim `(x, y)` maps to 3D `(x, 0, y)`. In Monkey Breach the breach/spawn is at `-y` (top of
-screen) and the banana pile is at `+y` (bottom).
+**Coordinate system:** world units are meters; the **core banana pile sits at the origin**. The
+sim is 2D on the ground plane; sim `(x, y)` maps to 3D `(x, 0, y)`. The world is open — the hero
+roams freely (clamped to `worldClamp`) and a follow-cam trails them.
 
-**Build-pad pattern** (reused across games): pads are fixed ground positions with `level`/`invested`
-(initialize both to 0 — forgetting `invested:0` yields `NaN` costs). Standing the hero within
-`padReach` drains coins into the nearest pad until it builds/upgrades; `applyPad()` then rebuilds
-the derived tower lists the sim reads (`rebuildTowers()` etc.). No free placement, no rotation.
+**Free-form building (NO plots/grid).** You start with nothing built. `CONFIG.build` is the tool
+catalogue (towers + `farm` + `wall`), each with `cost(lv)`/`stat(lv)`/`foot` (footprint radius) and
+`max` levels. `game.tool` is the selected tool; `ghostPos()` snaps the hero's position to `CONFIG.snap`.
+`canPlace(type,x,y)` checks afford + not in `coreClear` of the pile + not `inWater` + not `occupied`
+(min spacing `snap*0.9`). `placeTool()` pays `cost(1)` and pushes to `game.structures` (towers/farm/etc.)
+or `game.wallBlocks` (walls). `doUpgrade()` upgrades the structure within `hero.buildReach`. `rebuildDerived()`
+rebuilds the lists the sim reads (`netTowers`/`decoys`/`cages`/`muds`/`farms`/`trainees`/`ecoRate`) from
+`game.structures`. Render is stateless-ish: `syncStructures`/`syncWalls` create a mesh per item lazily
+(rebuild when `s._dirty` after upgrade); `setGhost`/`clearGhost` draw the green/red placement preview.
+
+**Progressive unlocks** (`CONFIG.startUnlocks` = net/farm/wall; `unlockByWave` = trainee/cage/decoy/mud):
+`checkUnlocks()` in `nextWave` adds tools with a toast; the tray (`syncTray`) greys locked/unaffordable chips.
+
+**Walls & water are real collision.** Wall blocks (`game.wallBlocks`, radius `CONFIG.build.wall.foot`)
+and the stream (`CONFIG.water`, crossable only at the bridge gap) push entities out via `collideWalls`/
+`collideWater` (degenerate `d==0` pushes along an axis — don't drop it). Hero and **monkeys** both collide
+with walls (monkeys seek the pile and slide around blocks to the gaps you leave); `def.climb` monkeys
+(gorilla) ignore walls entirely. Players wall in the pile and leave gaps as gates.
+
+**Spawn points are fixed & themed** (`CONFIG.regions[*].sx/sy`, act-gated by `CONFIG.acts`): Jungle (SW),
+Mountains (NE, wave 34), Zoo gate (E, wave 67). `spawn()` emits at the active region's point (+jitter);
+monkeys flee back to their spawn point. `render.buildSpawnMarkers(frontiers)` plants a banner/arrow there.
 
 **Monkey lifecycle:** `incoming → grab → fleeing → trapped`. A monkey grabs from the pile (or a
-decoy), flees to the nearest breach; escaping with a real banana loses it permanently, but a
-**trapped** carrier returns its banana when the truck loads it. The truck runs as a `phase==='truck'`
-sub-state machine (`in → load → out`).
+decoy), flees back out toward its spawn direction; escaping with a real banana loses it
+permanently, but a **trapped** carrier returns its banana when the truck loads it. The truck runs
+as a `phase==='truck'` sub-state machine (`in → load → out`), driving to the core from `-y`.
 
 ## Gotchas (these have bitten before — verify, don't assume)
 
@@ -73,7 +97,14 @@ sub-state machine (`in → load → out`).
   movement won't show in screenshots. Verify gameplay by calling `game.update(1/60)` in a loop via an
   injected script, then screenshot a stepped state.
 - **Three.js r128 has no `CapsuleGeometry`** — guard with `THREE.CapsuleGeometry ? new … : new CylinderGeometry(…)`.
-- **Use `THREE.NoToneMapping`** — ACES tonemapping washed the cartoon colors out.
+- **Use `THREE.NoToneMapping`** — ACES tonemapping washed the cartoon colors out. Keep **fog far
+  back** (~300–640) — a near fog plane greys the whole follow-cam frame into haze.
+- **Build UI is the HTML tray** (`#build`/`#tray`/`#buildBtn`/`#upgradeBtn`), not in-world labels.
+  `selectTool(type)` **toggles** (tapping the selected tool deselects) — when driving placement from a
+  test, set `game.tool=type` directly instead, or repeated `selectTool` calls cancel each other out.
+- **Headless screenshots:** because rAF is throttled when the tab is hidden, after you step the sim
+  with `game.update(1/60)` in a loop, manually call the render syncs + `game.render.followCam(hero,1)`
+  + `game.render.draw()` in the same eval before `preview_screenshot`, or you'll capture a stale frame.
 - The preview occasionally fails to start with `spawn …/disclaimer ENOENT`; it's transient — just call
   `preview_start` again, no config change needed.
 
