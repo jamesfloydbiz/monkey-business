@@ -132,7 +132,8 @@ class Renderer{
     const box=new THREE.Mesh(new THREE.BoxGeometry(s,s,s),this.mat(0x9a6a3b,{flat:true})); box.position.y=s/2; box.castShadow=true; g.add(box);
     const bars=new THREE.Mesh(new THREE.BoxGeometry(s*1.04,s*1.04,s*1.04),new THREE.MeshBasicMaterial({color:0x6a6f76,wireframe:true})); bars.position.y=s/2; g.add(bars); g.userData.col=1.4; return g; }
   makeMound(rng){ const s=4+rng()*4; const m=new THREE.Mesh(new THREE.SphereGeometry(s,10,7,0,TAU,0,Math.PI*0.5),this.mat(0x8a9098,{flat:true,r:1})); m.scale.y=0.32; m.position.y=-0.2; m.receiveShadow=true; m.castShadow=true; return m; }
-  disposeGroup(g){ g.traverse(o=>{ if(o.geometry) o.geometry.dispose(); }); }
+  // free BOTH geometry and materials — disposing only geometry leaked a material (and its GPU program) per mesh on every chunk unload, which is what bloated the tab
+  disposeGroup(g){ g.traverse(o=>{ if(o.geometry) o.geometry.dispose(); const m=o.material; if(m){ if(Array.isArray(m)) m.forEach(x=>x&&x.dispose()); else m.dispose(); } }); }
   clearChunks(){ for(const [k,g] of this.chunks){ this.chunkGroup.remove(g); this.disposeGroup(g); } this.chunks.clear(); this.cleared.clear(); this._collDirty=true; }
   // chop down the world prop nearest (x,y): drop its mesh + collider and remember it so it doesn't respawn when the chunk reloads
   clearPropAt(x,y){ if(!this.colliders) return null; let best=null,bd=1e9; for(const c of this.colliders){ const d=U.dist(x,y,c.x,c.y); if(d<bd){bd=d;best=c;} } if(!best) return null;
@@ -361,9 +362,9 @@ class Renderer{
   /* ---------- fx ---------- */
   burst(x,y,col){ for(let i=0;i<8;i++){ const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:this.glowTex,color:col||0xffce5e,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false})); sp.position.set(x,2,y); sp.scale.set(2,2,1); this.fxGroup.add(sp); this.fx.push({s:sp,vx:U.rand(-7,7),vy:U.rand(7,13),vz:U.rand(-7,7),life:0.5,max:0.5}); } }
   coinPop(x,y){ const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:this.glowTex,color:0xffce5e,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false})); sp.position.set(x,2,y); sp.scale.set(2.6,2.6,1); this.fxGroup.add(sp); this.fx.push({s:sp,vx:0,vy:15,vz:0,life:0.5,max:0.5}); }
-  updateFx(dt){ for(let i=this.fx.length-1;i>=0;i--){ const f=this.fx[i]; f.life-=dt; const a=U.clamp(f.life/f.max,0,1); f.s.position.x+=f.vx*dt; f.s.position.y+=f.vy*dt; f.s.position.z+=f.vz*dt; f.s.material.opacity=a; if(f.life<=0){ this.fxGroup.remove(f.s); this.fx.splice(i,1); } } }
+  updateFx(dt){ for(let i=this.fx.length-1;i>=0;i--){ const f=this.fx[i]; f.life-=dt; const a=U.clamp(f.life/f.max,0,1); f.s.position.x+=f.vx*dt; f.s.position.y+=f.vy*dt; f.s.position.z+=f.vz*dt; f.s.material.opacity=a; if(f.life<=0){ this.fxGroup.remove(f.s); if(f.s.material) f.s.material.dispose(); this.fx.splice(i,1); } } }
 
-  screenToWorld(sx,sy){ const ndc=new THREE.Vector2((sx/this.W)*2-1,-(sy/this.H)*2+1); const ray=new THREE.Raycaster(); ray.setFromCamera(ndc,this.camera);
+  screenToWorld(sx,sy){ const ndc=(this._ndc||(this._ndc=new THREE.Vector2())).set((sx/this.W)*2-1,-(sy/this.H)*2+1); const ray=this._ray||(this._ray=new THREE.Raycaster()); ray.setFromCamera(ndc,this.camera);   // reuse instances — this runs on every mousemove, no need to allocate
     const t=-ray.ray.origin.y/ray.ray.direction.y; return {x:ray.ray.origin.x+ray.ray.direction.x*t, y:ray.ray.origin.z+ray.ray.direction.z*t}; }
   resize(){ const w=window.innerWidth,h=window.innerHeight; this.W=w; this.H=h; this.renderer.setSize(w,h,false); this.camera.aspect=w/h; this.camera.updateProjectionMatrix(); }
   draw(){ this.renderer.render(this.scene,this.camera); }
