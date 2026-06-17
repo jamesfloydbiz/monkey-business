@@ -51,6 +51,7 @@ body{font-family:var(--font);color:var(--ink);user-select:none;-webkit-user-sele
 .bld-btn:active{transform:scale(0.95);}
 .bld-btn.go{background:linear-gradient(180deg,#6fd25a,var(--leaf-deep));}
 .bld-btn.up{background:linear-gradient(180deg,#f3c34f,var(--coin-deep));}
+.bld-btn.sell{background:linear-gradient(180deg,#e0876a,#b3543a);}
 .bld-btn.ghost{background:rgba(40,30,15,0.5);color:#fff;font-weight:700;padding:12px 18px;}
 .bld-btn.off{background:linear-gradient(180deg,#caa07a,#9c6a4e);opacity:0.94;}
 .bld-btn .why{font-size:13px;font-weight:700;letter-spacing:0.01em;}

@@ -71,27 +71,28 @@ const CONFIG = {
 
   /* ---- monkey archetypes ---- */
   monkeys: {
-    normal:  { speed:6.4,  nets:1, bounty:3,  grab:0.6,  r:1.3, hex:0x8a5a2e, name:'Monkey' },
-    fast:    { speed:10.2, nets:1, bounty:4,  grab:0.35, r:1.1, hex:0xb5793a, name:'Quick' },
-    alpha:   { speed:5.0,  nets:2, bounty:9,  grab:0.8,  r:2.0, hex:0x5a3a1e, name:'Alpha' },
-    bold:    { speed:7.6,  nets:1, bounty:6,  grab:0.5,  r:1.3, hex:0x9a4a2a, name:'Bold', decoyProof:true },
-    mandrill:{ speed:6.8,  nets:2, bounty:12, grab:0.6,  r:1.7, hex:0x6a4636, name:'Mandrill', zoo:true },
-    gorilla: { speed:3.6,  nets:4, bounty:30, grab:1.1,  r:2.7, hex:0x2f2b2b, name:'Gorilla', decoyProof:true, climb:true, zoo:true },
-    boss:    { speed:4.4,  nets:5, bounty:40, grab:1.0,  r:3.2, hex:0x3a2410, name:'Silverback', boss:true, zoo:true },
+    normal:  { speed:7.6,  nets:1, bounty:0, steal:1, grab:0.5,  r:1.3, hex:0x8a5a2e, name:'Monkey' },
+    fast:    { speed:12.0, nets:1, bounty:0, steal:1, grab:0.3,  r:1.1, hex:0xb5793a, name:'Quick' },
+    alpha:   { speed:6.0,  nets:2, bounty:1, steal:2, grab:0.7,  r:2.0, hex:0x5a3a1e, name:'Alpha' },
+    bold:    { speed:9.0,  nets:1, bounty:0, steal:1, grab:0.45, r:1.3, hex:0x9a4a2a, name:'Bold', decoyProof:true },
+    mandrill:{ speed:8.2,  nets:2, bounty:1, steal:2, grab:0.5,  r:1.7, hex:0x6a4636, name:'Mandrill', zoo:true },
+    gorilla: { speed:4.4,  nets:4, bounty:3, steal:4, grab:1.0,  r:2.7, hex:0x2f2b2b, name:'Gorilla', decoyProof:true, climb:true, zoo:true },
+    boss:    { speed:5.2,  nets:5, bounty:8, steal:8, grab:0.9,  r:3.2, hex:0x3a2410, name:'Silverback', boss:true, zoo:true },
   },
 
   /* ---- 100 waves, boss every 10th ---- */
   totalWaves: 100,
   waveSpec(n){
     const boss = (n % 10 === 0);
-    const count = Math.round(4 + n*2.3 + Math.pow(n,1.35)*0.5);
-    const interval = Math.max(0.3, 1.6 - n*0.06);
+    // snappier waves: ~4 → ~12 → ~50 → ~100 monsters across the run (challenge comes from tougher types, not endless count)
+    const count = Math.round(3 + n*0.4 + Math.pow(n,1.1)*0.2);   // fewer but tankier (toughness scales via netBonus) → snappier waves
+    const interval = Math.max(0.22, 1.2 - n*0.06);
     const frontiers = this.actFor(n).frontiers;
     const pool=[['normal', 1]];
-    if(n>=3) pool.push(['fast',  0.4 + n*0.02]);
-    if(n>=6) pool.push(['alpha', 0.2 + n*0.015]);
-    if(n>=9) pool.push(['bold',  0.3 + n*0.02]);
-    if(frontiers.includes('zoo')){ pool.push(['mandrill', 0.5]); pool.push(['gorilla', 0.25]); }
+    if(n>=3) pool.push(['fast',  0.4 + n*0.03]);
+    if(n>=6) pool.push(['alpha', 0.2 + n*0.035]);     // heavier on multi-net types as waves climb
+    if(n>=9) pool.push(['bold',  0.3 + n*0.03]);
+    if(frontiers.includes('zoo')){ pool.push(['mandrill', 0.7 + n*0.01]); pool.push(['gorilla', 0.4 + n*0.012]); }
     return { count, interval, pool, frontiers, boss };
   },
 };

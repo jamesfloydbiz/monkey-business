@@ -36,6 +36,17 @@ waves). One line each. Promote to a task when one earns it. See also [IDEAS.md](
 - **Daily seed / score** — a fixed wave seed with a shareable "waves survived" score.
 - *(rejected by James: between-wave shop, unlock tree — keep building/upgrading purely in-world.)*
 
+## Aesthetic / art polish (DO LAST — James flagged grass/trees/rocks/characters as too basic)
+- **Ground** — replace flat tinted tiles with a soft multi-tone gradient + scattered detail decals (dirt patches, pebbles, fallen leaves), gentle low-frequency height (berms) so it isn't a flat sheet.
+- **Grass** — instanced grass blades / billboarded tufts that sway, denser near water, sparse on trails; subtle wind shimmer.
+- **Trees** — varied species silhouettes (round, pine, palm, acacia), 2–3 size variants, slight sway, darker ambient-occluded undersides, fruit on jungle trees.
+- **Rocks** — varied shapes with mossy tops, flat-shaded facets with a rim highlight; cluster them naturally instead of uniform scatter.
+- **Characters** — rounder, smoother keeper + monkeys (more segments), simple idle/walk squash-stretch, blink/ear-twitch, expressive faces; distinct silhouettes per monkey type (alpha mane, gorilla bulk, mandrill colors).
+- **Materials** — bump env-map intensity for soft sheen on metal/coins; add a faint toon rim-light shader pass; gentle ambient occlusion contact shadows under every object.
+- **Water** — animated flowing stream (scrolling normal), foam at the banks, sparkle; lily pads.
+- **Lighting/mood** — slow day→dusk color drift; warmer golden-hour key; bloom on the pile + claws.
+- **Cohesion** — a tighter, art-directed palette (pick ~8 hues) so everything feels designed, not default-colored.
+
 ## Juice / feel (cheap, high-impact)
 - **Banana magnet** — returned bananas fly to the pile with a satisfying chime and number popup.
 - **Trap pop** — a squashy bounce + net-snap SFX + screen-shake on boss traps.

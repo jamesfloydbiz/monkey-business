@@ -176,8 +176,13 @@ class Renderer{
   /* ---- supply network: poles already placed as structures; here we string wires + run claws ---- */
   drawSupply(game){ const wg=this.wireGroup; while(wg.children.length){ const c=wg.children[0]; wg.remove(c); this.disposeGroup(c); }
     const H=this.WIRE_H; for(const e of (game.supplyWires||[])) this.addWire(wg,e[0],e[1],e[2],e[3],H);
-    const cg=this.clawGroup; while(cg.children.length){ const c=cg.children[0]; cg.remove(c); this.disposeGroup(c); } this.claws=[];
-    for(const s of game.structures){ if(s.type==='farm' && s.connected && s.path && s.path.length>=2) this.claws.push(this.makeClaw(s.path,H)); } }
+    // claws are per-farm and PRESERVED across rebuilds (placing/upgrading anything must not restart them)
+    this.claws=[];
+    for(const s of game.structures){ if(s.type==='farm' && s.connected && s.path && s.path.length>=2){
+        if(!s._claw) s._claw=this.makeClaw(s.path,H); else this.retargetClaw(s._claw,s.path,H);   // keep its travel progress
+        this.claws.push(s._claw);
+      } else if(s._claw){ this.clawGroup.remove(s._claw.grp); this.disposeGroup(s._claw.grp); s._claw=null; } } }
+  retargetClaw(c,path,h){ const pts=path.map(p=>new THREE.Vector3(p.x,h,p.y)); const segLen=[]; let total=0; for(let i=0;i<pts.length-1;i++){ const l=pts[i].distanceTo(pts[i+1]); segLen.push(l); total+=l; } c.pts=pts; c.segLen=segLen; c.total=Math.max(0.001,total); if(c.t>c.total) c.t=c.total; }
   addWire(g,ax,ay,bx,by,h){ const a=new THREE.Vector3(ax,h,ay), b=new THREE.Vector3(bx,h,by), len=a.distanceTo(b); if(len<0.1) return;
     const m=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.07,len,5),this.mat(0x33291e)); m.position.copy(a).add(b).multiplyScalar(0.5);
     m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), b.clone().sub(a).normalize()); g.add(m); }
@@ -300,9 +305,10 @@ class Renderer{
     const bob=m.state==='trapped'?0:Math.abs(Math.sin(m.wob||0))*0.5; m.mesh.position.set(m.x,bob,m.y); m.mesh.rotation.y=-(m.face||0)+Math.PI/2;
     m.mesh.userData.net.visible=m.state==='trapped'; m.mesh.userData.ban.visible=!!m.carrying; if(m.state==='trapped') m.mesh.rotation.z=Math.sin(m.struggle||0)*0.15; } }
   removeMonkeyMesh(m){ if(m.mesh){ this.monkeyGroup.remove(m.mesh); this.disposeGroup(m.mesh); m.mesh=null; } }
-  syncTrainees(list,t){ if(this._trainCount!==list.length){ while(this.trainGroup.children.length) this.trainGroup.remove(this.trainGroup.children[0]); for(const k of list) k.mesh=null; this._trainCount=list.length; }
-    for(const k of list){ if(!k.mesh){ k.mesh=this.makeKeeper(); this.trainGroup.add(k.mesh); }
-      const bob=k.moving?Math.abs(Math.sin(k.wob))*0.3:0; k.mesh.position.set(k.x,bob,k.y); k.mesh.rotation.y=-(k.aim||0)+Math.PI/2; } }
+  syncTrainees(list,t){ const have=new Set();
+    for(const k of list){ if(!k.mesh){ k.mesh=this.makeKeeper(); this.trainGroup.add(k.mesh); } have.add(k.mesh);
+      const bob=k.moving?Math.abs(Math.sin(k.wob))*0.3:0; k.mesh.position.set(k.x,bob,k.y); k.mesh.rotation.y=-(k.aim||0)+Math.PI/2; }
+    for(let i=this.trainGroup.children.length-1;i>=0;i--){ const m=this.trainGroup.children[i]; if(!have.has(m)){ this.trainGroup.remove(m); this.disposeGroup(m); } } }
   syncNets(list){ while(this.netGroup.children.length<list.length){ const n=new THREE.Mesh(new THREE.TorusGeometry(0.8,0.18,6,10),new THREE.MeshBasicMaterial({color:0xffffff})); this.netGroup.add(n); }
     for(let i=0;i<this.netGroup.children.length;i++){ const c=this.netGroup.children[i]; if(i<list.length){ c.visible=true; c.position.set(list[i].x,2.2,list[i].y); c.rotation.x=Math.PI/2; c.rotation.z=(list[i].spin=(list[i].spin||0)+0.3); } else c.visible=false; } }
   setTruck(v,x,y,ang){ this.truck.visible=v; if(v){ this.truck.position.set(x,0,y); this.truck.rotation.y=ang||0; } }
